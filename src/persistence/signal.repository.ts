@@ -51,6 +51,11 @@ export class SignalRepository {
     return inserted;
   }
 
+  async findById(id: string): Promise<RawSignal | null> {
+    const row = await this.prisma.signal.findUnique({ where: { id } });
+    return row ? toDomain(row) : null;
+  }
+
   async findUnused(): Promise<RawSignal[]> {
     const rows = await this.prisma.signal.findMany({
       where: { usedAt: null },

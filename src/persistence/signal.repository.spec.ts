@@ -62,4 +62,16 @@ describe('SignalRepository', () => {
     const unused = await repo.findUnused();
     expect(unused.map((s) => s.id)).not.toContain(fresh.id);
   });
+
+  it('finds a signal by id', async () => {
+    const [fresh] = await repo.saveNew([signal('findById target')]);
+    const found = await repo.findById(fresh.id);
+    expect(found?.id).toBe(fresh.id);
+    expect(found?.payload).toBe('findById target');
+  });
+
+  it('returns null when the signal id does not exist', async () => {
+    const found = await repo.findById('nonexistent-id');
+    expect(found).toBeNull();
+  });
 });
