@@ -1,0 +1,45 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Signal {
+  id         String   @id @default(cuid())
+  source     String
+  kind       String
+  payload    String
+  refs       String   @default("[]")
+  hash       String   @unique
+  capturedAt DateTime
+  usedAt     DateTime?
+
+  @@index([usedAt])
+}
+
+model Draft {
+  id           String    @id @default(cuid())
+  signalId     String
+  topic        String
+  bodyEs       String
+  status       String
+  revisions    String    @default("[]")
+  scheduledAt  DateTime?
+  publishedUrn String?
+  publishAttempts Int    @default(0)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([status])
+}
+
+model CycleLog {
+  id      String   @id @default(cuid())
+  at      DateTime
+  outcome String
+
+  @@index([at])
+}
