@@ -1,6 +1,7 @@
 import { GeneratorService } from './generator.service';
 import { LlmPort } from '../core/ports/llm.port';
 import { DraftRepository } from '../persistence/draft.repository';
+import { SignalRepository } from '../persistence/signal.repository';
 import { Draft } from '../core/draft.entity';
 import { RawSignal } from '../core/signal.entity';
 
@@ -50,11 +51,20 @@ function fakeRepo() {
   };
 }
 
+/** Fake SignalRepository whose findById resolves from a provided lookup table, or null if absent. */
+function fakeSignalRepo(signals: Record<string, RawSignal> = {}) {
+  return {
+    findById: async (id: string) => signals[id] ?? null,
+  } as unknown as SignalRepository;
+}
+
 describe('GeneratorService.generateFor', () => {
   it('persists a PENDING_REVIEW draft when the first generation passes the guard', async () => {
     const llm: LlmPort = { generate: async () => VALID_BODY };
     const { repo } = fakeRepo();
-    const draft = await new GeneratorService(llm, repo, 'perfil').generateFor(signal);
+    const { draft } = await new GeneratorService(llm, repo, fakeSignalRepo(), 'perfil').generateFor(
+      signal,
+    );
 
     expect(draft.status).toBe('PENDING_REVIEW');
     expect(draft.bodyEs).toBe(VALID_BODY);
@@ -67,7 +77,9 @@ describe('GeneratorService.generateFor', () => {
     const llm: LlmPort = { generate: async () => outputs[calls++] };
     const { repo } = fakeRepo();
 
-    const draft = await new GeneratorService(llm, repo, 'perfil').generateFor(signal);
+    const { draft } = await new GeneratorService(llm, repo, fakeSignalRepo(), 'perfil').generateFor(
+      signal,
+    );
 
     expect(calls).toBe(2);
     expect(draft.bodyEs).toBe(VALID_BODY);
@@ -79,17 +91,19 @@ describe('GeneratorService.generateFor', () => {
     const llm: LlmPort = { generate: async () => bad };
     const { repo } = fakeRepo();
 
-    const service = new GeneratorService(llm, repo, 'perfil');
-    const draft = await service.generateFor(signal);
+    const service = new GeneratorService(llm, repo, fakeSignalRepo(), 'perfil');
+    const { draft, violations } = await service.generateFor(signal);
 
     expect(draft.status).toBe('PENDING_REVIEW');
-    expect(service.lastViolations.map((v) => v.rule)).toContain('hashtag-count');
+    expect(violations.map((v) => v.rule)).toContain('hashtag-count');
   });
 
   it('derives the topic from the signal payload', async () => {
     const llm: LlmPort = { generate: async () => VALID_BODY };
     const { repo } = fakeRepo();
-    const draft = await new GeneratorService(llm, repo, 'perfil').generateFor(signal);
+    const { draft } = await new GeneratorService(llm, repo, fakeSignalRepo(), 'perfil').generateFor(
+      signal,
+    );
     expect(draft.topic).toBe('feat: retry con backoff exponencial');
   });
 
@@ -102,12 +116,46 @@ describe('GeneratorService.generateFor', () => {
       },
     };
     const { repo } = fakeRepo();
-    const service = new GeneratorService(llm, repo, 'perfil');
-    const draft = await service.generateFor(signal);
+    const service = new GeneratorService(llm, repo, fakeSignalRepo({ [signal.id]: signal }), 'perfil');
+    const { draft } = await service.generateFor(signal);
 
     await service.regenerate({ ...draft, status: 'REVISING' }, 'mas corto');
 
     expect(prompts[1]).toContain('mas corto');
     expect(prompts[1]).toContain(VALID_BODY);
+  });
+
+  it('regenerate anchors the guard on the real signal refs when a revision cites them', async () => {
+    const revised = `Ajusté el backoff en bitacora@abc123 después del feedback: bajé el primer intento a 30 segundos en vez de 1 minuto.
+
+El resto de la lógica queda igual: guardo publishAttempts en la fila del draft, no en memoria, y sigo avisando después de tres intentos para que decida un humano. Este cambio es puntual, sobre el mismo fix de la cola de publicación que rompí la semana pasada por un retry naíf de intervalo fijo.`;
+    const llm: LlmPort = { generate: async () => revised };
+    const { repo } = fakeRepo();
+    const service = new GeneratorService(llm, repo, fakeSignalRepo({ [signal.id]: signal }), 'perfil');
+    const { draft } = await service.generateFor(signal);
+
+    const { violations } = await service.regenerate({ ...draft, status: 'REVISING' }, 'mas corto');
+
+    expect(violations.map((v) => v.rule)).not.toContain('missing-reference');
+  });
+
+  it('regenerate still flags missing-reference when the revision only fabricates a number', async () => {
+    // "Fabricated number" spelled out in words, not digits: the guard's own
+    // anchor check is a literal `/\d/` test (left untouched — a deferred,
+    // separately-tracked minor), so a body with zero digit characters, no
+    // code span and no match against the real signal refs must still trip
+    // missing-reference. This is what distinguishes "cites a real fact"
+    // from "vaguely gestures at having facts".
+    const fabricated = `Cambié un poco el enfoque del retry y ahora reintento algunas veces con un delay de unos cuantos segundos entre cada intento, pero no cité el hecho de origen real ni el commit concreto.
+
+El resto de este párrafo es puro relleno para llegar a la longitud mínima que exige el guard determinista de estilo, sin aportar ningún dato verificable sobre el commit real, el archivo que cambió o el error puntual que motivó el cambio. Todo queda deliberadamente vago y sin ancla concreta al hecho de origen, como cualquier post genérico que este guard está pensado para frenar antes de que salga publicado.`;
+    const llm: LlmPort = { generate: async () => fabricated };
+    const { repo } = fakeRepo();
+    const service = new GeneratorService(llm, repo, fakeSignalRepo({ [signal.id]: signal }), 'perfil');
+    const { draft } = await service.generateFor(signal);
+
+    const { violations } = await service.regenerate({ ...draft, status: 'REVISING' }, 'mas corto');
+
+    expect(violations.map((v) => v.rule)).toContain('missing-reference');
   });
 });
