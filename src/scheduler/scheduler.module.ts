@@ -9,9 +9,11 @@ import { PersistenceModule } from '../persistence/persistence.module';
 import { CycleService } from './cycle.service';
 import { SchedulerService } from './scheduler.service';
 
-// PublisherModule deliberately does not import TelegramModule yet (see its
-// own comment), so this module imports both directly to satisfy
-// REVIEW_CHANNEL_PORT for CycleService and PublishQueue alike.
+// PublisherModule imports TelegramModule itself (to satisfy PublishQueue's
+// REVIEW_CHANNEL_PORT dependency), but that import is private to
+// PublisherModule's own injector scope and is not re-exported. CycleService
+// is a provider of this module, so it needs its own visibility into
+// REVIEW_CHANNEL_PORT — hence importing TelegramModule directly here too.
 @Module({
   imports: [
     ScheduleModule.forRoot(),
