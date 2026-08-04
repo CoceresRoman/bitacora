@@ -28,6 +28,7 @@ export class TelegramAdapter implements ReviewChannelPort, OnModuleInit, OnModul
   private awaitingFeedbackFor: string | null = null;
   private offset = 0;
   private polling = false;
+  private pollAbort: AbortController | null = null;
 
   constructor(
     private readonly client: TelegramClient,
@@ -40,13 +41,26 @@ export class TelegramAdapter implements ReviewChannelPort, OnModuleInit, OnModul
     void this.pollLoop();
   }
 
+  /**
+   * Stops the poll loop and aborts whatever getUpdates() call is currently
+   * in flight, so shutdown does not have to wait out the up-to-30s long
+   * poll. Without the abort, the flag alone is still correct (the loop
+   * checks it before every iteration) but a live process or test run could
+   * block for the remainder of POLL_TIMEOUT_SEC before actually exiting.
+   */
   onModuleDestroy(): void {
     this.polling = false;
+    this.pollAbort?.abort();
   }
 
   private async pollLoop(): Promise<void> {
     while (this.polling) {
-      const updates = await this.client.getUpdates(this.offset, POLL_TIMEOUT_SEC);
+      this.pollAbort = new AbortController();
+      const updates = await this.client.getUpdates(
+        this.offset,
+        POLL_TIMEOUT_SEC,
+        this.pollAbort.signal,
+      );
       for (const update of updates) {
         this.offset = update.update_id + 1;
         try {
@@ -117,6 +131,16 @@ export class TelegramAdapter implements ReviewChannelPort, OnModuleInit, OnModul
 
   private async handleCallback(callbackId: string, data: string, now: Date): Promise<void> {
     const [action, draftId] = data.split(':');
+    if (!action || !draftId) {
+      this.logger.warn(`Malformed callback data: ${data}`);
+      return;
+    }
+
+    // Any tap replaces whatever revise state was pending — a stale marker
+    // from a different draft must never survive an unrelated action, and a
+    // second "rev" must replace the first rather than stack with it.
+    this.awaitingFeedbackFor = null;
+
     switch (action) {
       case 'ok':
         await this.client.answerCallbackQuery(callbackId, 'Aprobado');

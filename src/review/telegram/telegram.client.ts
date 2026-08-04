@@ -12,6 +12,9 @@ export interface InlineKeyboard {
 export interface TelegramUpdate {
   update_id: number;
   message?: { chat: { id: number }; text?: string };
+  /** Telegram can send these for edited or channel-authored content; we intentionally never act on them. */
+  edited_message?: { chat: { id: number }; text?: string };
+  channel_post?: { chat: { id: number }; text?: string };
   callback_query?: {
     id: string;
     data?: string;
@@ -25,12 +28,13 @@ export class TelegramClient {
 
   constructor(private readonly botToken: string) {}
 
-  private async call<T>(method: string, body: unknown): Promise<T | null> {
+  private async call<T>(method: string, body: unknown, signal?: AbortSignal): Promise<T | null> {
     try {
       const response = await fetch(`https://api.telegram.org/bot${this.botToken}/${method}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
+        signal,
       });
       if (!response.ok) {
         this.logger.warn(`Telegram ${method} failed with status ${response.status}`);
@@ -39,13 +43,22 @@ export class TelegramClient {
       const payload = (await response.json()) as { ok: boolean; result: T };
       return payload.ok ? payload.result : null;
     } catch (error) {
+      if ((error as Error).name === 'AbortError') {
+        return null;
+      }
       this.logger.warn(`Telegram ${method} unreachable: ${(error as Error).message}`);
       return null;
     }
   }
 
-  async getUpdates(offset: number, timeoutSec: number): Promise<TelegramUpdate[]> {
-    return (await this.call<TelegramUpdate[]>('getUpdates', { offset, timeout: timeoutSec })) ?? [];
+  async getUpdates(
+    offset: number,
+    timeoutSec: number,
+    signal?: AbortSignal,
+  ): Promise<TelegramUpdate[]> {
+    return (
+      (await this.call<TelegramUpdate[]>('getUpdates', { offset, timeout: timeoutSec }, signal)) ?? []
+    );
   }
 
   async sendMessage(chatId: string, text: string, keyboard?: InlineKeyboard): Promise<void> {

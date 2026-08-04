@@ -164,4 +164,165 @@ describe('TelegramAdapter decisions', () => {
 
     expect(t.captured).toEqual(['otra idea suelta']);
   });
+
+  it('clears a stale pending revision when a different draft is approved', async () => {
+    const t = adapter();
+    const decisions: Array<[string, Decision]> = [];
+    t.adapter.onDecision(async (id, decision) => {
+      decisions.push([id, decision]);
+    });
+
+    await t.adapter.handleUpdate(callbackUpdate(ALLOWED, 'rev:d1'), NOW);
+    await t.adapter.handleUpdate(callbackUpdate(ALLOWED, 'ok:d2'), NOW);
+    await t.adapter.handleUpdate(textUpdate(ALLOWED, 'nueva idea suelta'), NOW);
+
+    expect(decisions).toEqual([['d2', { kind: 'approve' }]]);
+    expect(t.captured).toEqual(['nueva idea suelta']);
+  });
+
+  it('replaces the pending revision when rev is tapped again for a different draft', async () => {
+    const t = adapter();
+    const decisions: Array<[string, Decision]> = [];
+    t.adapter.onDecision(async (id, decision) => {
+      decisions.push([id, decision]);
+    });
+
+    await t.adapter.handleUpdate(callbackUpdate(ALLOWED, 'rev:d1'), NOW);
+    await t.adapter.handleUpdate(callbackUpdate(ALLOWED, 'rev:d2'), NOW);
+    await t.adapter.handleUpdate(textUpdate(ALLOWED, 'mas corto para d2'), NOW);
+
+    expect(decisions).toEqual([['d2', { kind: 'revise', feedback: 'mas corto para d2' }]]);
+    expect(t.captured).toEqual([]);
+  });
+
+  it('ignores malformed callback data with no draft id', async () => {
+    const t = adapter();
+    const decisions: Array<[string, Decision]> = [];
+    t.adapter.onDecision(async (id, decision) => {
+      decisions.push([id, decision]);
+    });
+
+    await t.adapter.handleUpdate(callbackUpdate(ALLOWED, 'ok'), NOW);
+    await t.adapter.handleUpdate(callbackUpdate(ALLOWED, 'ok:'), NOW);
+
+    expect(decisions).toEqual([]);
+    expect(t.answered).toEqual([]);
+  });
+});
+
+describe('TelegramAdapter unsupported update shapes', () => {
+  it('drops an edited_message update with no reply', async () => {
+    const t = adapter();
+    const decisions: Array<[string, Decision]> = [];
+    t.adapter.onDecision(async (id, decision) => {
+      decisions.push([id, decision]);
+    });
+
+    const update: TelegramUpdate = {
+      update_id: 10,
+      edited_message: { chat: { id: Number(ALLOWED) }, text: 'edited idea' },
+    };
+    await t.adapter.handleUpdate(update, NOW);
+
+    expect(decisions).toEqual([]);
+    expect(t.captured).toEqual([]);
+    expect(t.sent).toEqual([]);
+  });
+
+  it('drops a channel_post update with no reply', async () => {
+    const t = adapter();
+    const decisions: Array<[string, Decision]> = [];
+    t.adapter.onDecision(async (id, decision) => {
+      decisions.push([id, decision]);
+    });
+
+    const update: TelegramUpdate = {
+      update_id: 11,
+      channel_post: { chat: { id: Number(ALLOWED) }, text: 'posted to channel' },
+    };
+    await t.adapter.handleUpdate(update, NOW);
+
+    expect(decisions).toEqual([]);
+    expect(t.captured).toEqual([]);
+    expect(t.sent).toEqual([]);
+  });
+
+  it('drops a callback_query with no message with no reply', async () => {
+    const t = adapter();
+    const decisions: Array<[string, Decision]> = [];
+    t.adapter.onDecision(async (id, decision) => {
+      decisions.push([id, decision]);
+    });
+
+    const update: TelegramUpdate = {
+      update_id: 12,
+      callback_query: { id: 'cb2', data: 'ok:d1' },
+    };
+    await t.adapter.handleUpdate(update, NOW);
+
+    expect(decisions).toEqual([]);
+    expect(t.answered).toEqual([]);
+    expect(t.sent).toEqual([]);
+  });
+});
+
+function flush(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+describe('TelegramAdapter poll loop', () => {
+  it('processes a queued update, then aborts the in-flight poll and stops on destroy', async () => {
+    const resolvers: Array<(updates: TelegramUpdate[]) => void> = [];
+    const signals: Array<AbortSignal | undefined> = [];
+    const sent: Array<{ chatId: string; text: string }> = [];
+    const captured: string[] = [];
+
+    const client = {
+      sendMessage: async (chatId: string, text: string) => {
+        sent.push({ chatId, text });
+      },
+      answerCallbackQuery: async () => undefined,
+      getUpdates: (_offset: number, _timeoutSec: number, signal?: AbortSignal) => {
+        signals.push(signal);
+        return new Promise<TelegramUpdate[]>((resolve) => {
+          resolvers.push(resolve);
+        });
+      },
+    } as unknown as TelegramClient;
+    const inbox = {
+      capture: async (text: string) => {
+        captured.push(text);
+      },
+    } as unknown as InboxSource;
+
+    const pollAdapter = new TelegramAdapter(client, inbox, {
+      botToken: 't',
+      allowedChatId: ALLOWED,
+    });
+
+    pollAdapter.onModuleInit();
+    await flush();
+    expect(resolvers).toHaveLength(1);
+
+    resolvers[0]([textUpdate(ALLOWED, 'idea del poll')]);
+    await flush();
+    await flush();
+    expect(captured).toEqual(['idea del poll']);
+    expect(sent[0]?.text).toMatch(/guardad[ao]/i);
+    expect(resolvers).toHaveLength(2);
+
+    pollAdapter.onModuleDestroy();
+    expect(signals[1]?.aborted).toBe(true);
+
+    // Resolve the aborted call the way a real fetch abort would: with no
+    // updates. The loop must observe `polling === false` and exit instead
+    // of issuing a third getUpdates call.
+    resolvers[1]([]);
+    await flush();
+    await flush();
+
+    const resolverCountAfterDestroy = resolvers.length;
+    await flush();
+    expect(resolvers).toHaveLength(resolverCountAfterDestroy);
+  });
 });
