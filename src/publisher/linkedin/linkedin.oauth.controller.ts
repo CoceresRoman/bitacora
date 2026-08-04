@@ -1,6 +1,7 @@
 import { Controller, Get, Query, Res, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'node:crypto';
+import type { Response } from 'express';
 import type { Env } from '../../config/env.schema';
 import { TokenStore } from './token.store';
 
@@ -8,19 +9,6 @@ const AUTH_URL = 'https://www.linkedin.com/oauth/v2/authorization';
 const TOKEN_URL = 'https://www.linkedin.com/oauth/v2/accessToken';
 const USERINFO_URL = 'https://api.linkedin.com/v2/userinfo';
 const SCOPES = 'openid profile w_member_social';
-
-// `@types/express` is not a dependency of this project (verified: absent
-// from package.json and the resolved node_modules tree on feat/mvp), so
-// `import type { Response } from 'express'` fails `tsc` with TS7016 even
-// though the package that ships the runtime object (@nestjs/platform-express)
-// is installed. This file is out of scope for adding that dependency
-// (package.json is owned by another task), so we declare the minimal shape
-// this controller actually uses instead of pulling in express's full types.
-// NestJS's @Res() decorator injects the real Express response object at
-// runtime regardless of the TypeScript annotation here.
-interface RedirectableResponse {
-  redirect(url: string): void;
-}
 
 @Controller('auth/linkedin')
 export class LinkedInOAuthController {
@@ -33,7 +21,7 @@ export class LinkedInOAuthController {
   ) {}
 
   @Get()
-  start(@Res() res: RedirectableResponse): void {
+  start(@Res() res: Response): void {
     this.pendingState = randomBytes(16).toString('hex');
     const params = new URLSearchParams({
       response_type: 'code',

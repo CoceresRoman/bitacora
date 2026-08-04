@@ -52,6 +52,12 @@ rotating it invalidates any stored token and forces reconnection.
 
 ## 4. Connect the account
 
+The server binds to `127.0.0.1` only (see `src/main.ts`) because the OAuth
+routes below have no auth guard — anyone who could reach them over the
+network could complete their own LinkedIn consent and hijack which account
+the service posts to. If you're not on the same machine, open an SSH tunnel
+first (`ssh -L 3000:127.0.0.1:3000 host`) rather than widening the bind.
+
 1. Start the service (`npm run start:dev` or equivalent).
 2. Open `http://localhost:3000/auth/linkedin` in a browser where you're
    logged into the LinkedIn account that should own the posts.
