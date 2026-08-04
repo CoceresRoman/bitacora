@@ -91,4 +91,21 @@ export class DraftRepository {
     });
     return rows.map(toDomain);
   }
+
+  async incrementAttempts(id: string): Promise<number> {
+    const row = await this.prisma.draft.update({
+      where: { id },
+      data: { publishAttempts: { increment: 1 } },
+      select: { publishAttempts: true },
+    });
+    return row.publishAttempts;
+  }
+
+  async attemptsFor(id: string): Promise<number> {
+    const row = await this.prisma.draft.findUnique({
+      where: { id },
+      select: { publishAttempts: true },
+    });
+    return row?.publishAttempts ?? 0;
+  }
 }
