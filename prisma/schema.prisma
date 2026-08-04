@@ -43,3 +43,11 @@ model CycleLog {
 
   @@index([at])
 }
+
+model LinkedInToken {
+  id                  String   @id @default("singleton")
+  encryptedAccessToken String
+  memberUrn           String
+  expiresAt           DateTime
+  updatedAt           DateTime @updatedAt
+}
