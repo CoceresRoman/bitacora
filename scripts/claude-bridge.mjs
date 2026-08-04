@@ -1,15 +1,24 @@
 #!/usr/bin/env node
 // Local bridge to the Claude CLI. Uses your Claude subscription — no API key.
 // Start with: CLAUDE_BRIDGE_SECRET=... npm run bridge
+//
+// The request-handling logic (auth check, JSON parsing, status codes) lives
+// in src/llm/bridge-server.js so it can be unit tested without binding a
+// port or spawning the real `claude` CLI — see src/llm/bridge-server.spec.ts.
+// This file stays a thin, zero-build-step wiring layer: it owns the CLI
+// spawn (runClaude) and the actual createServer/listen call.
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
+import { createRequestListener, requireSecret } from '../src/llm/bridge-server.js';
 
 const PORT = Number(process.env.CLAUDE_BRIDGE_PORT ?? 8788);
-const SECRET = process.env.CLAUDE_BRIDGE_SECRET;
 const TIMEOUT_MS = Number(process.env.CLAUDE_BRIDGE_TIMEOUT_MS ?? 180000);
 
-if (!SECRET) {
-  console.error('CLAUDE_BRIDGE_SECRET is required');
+let SECRET;
+try {
+  SECRET = requireSecret(process.env.CLAUDE_BRIDGE_SECRET);
+} catch (error) {
+  console.error(error.message);
   process.exit(1);
 }
 
@@ -49,29 +58,7 @@ function runClaude(prompt) {
   });
 }
 
-const server = createServer((req, res) => {
-  const send = (status, body) => {
-    res.writeHead(status, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(body));
-  };
-
-  if (req.method !== 'POST' || req.url !== '/generate') return send(404, { error: 'not found' });
-  if (req.headers['x-bridge-secret'] !== SECRET) return send(401, { error: 'unauthorized' });
-
-  let raw = '';
-  req.on('data', (chunk) => (raw += chunk));
-  req.on('end', async () => {
-    try {
-      const { prompt } = JSON.parse(raw);
-      if (typeof prompt !== 'string' || prompt.trim() === '') {
-        return send(400, { error: 'prompt is required' });
-      }
-      send(200, { text: await runClaude(prompt) });
-    } catch (error) {
-      send(500, { error: error.message });
-    }
-  });
-});
+const server = createServer(createRequestListener({ secret: SECRET, runClaude }));
 
 // 127.0.0.1 only. Never bind this to a public interface.
 server.listen(PORT, '127.0.0.1', () => {

@@ -49,4 +49,15 @@ describe('ClaudeCliAdapter', () => {
 
     await expect(new ClaudeCliAdapter(CONFIG).generate('x')).rejects.toThrow(/malformed/i);
   });
+
+  it('throws a clear error when the bridge returns a 2xx with a non-JSON body', async () => {
+    globalThis.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => {
+        throw new SyntaxError('Unexpected token < in JSON at position 0');
+      },
+    }) as unknown as typeof fetch;
+
+    await expect(new ClaudeCliAdapter(CONFIG).generate('x')).rejects.toThrow(/malformed/i);
+  });
 });

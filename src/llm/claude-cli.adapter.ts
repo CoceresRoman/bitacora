@@ -33,7 +33,12 @@ export class ClaudeCliAdapter implements LlmPort {
       throw new Error(`Claude bridge returned ${response.status}: ${await response.text()}`);
     }
 
-    const body = (await response.json()) as { text?: unknown };
+    let body: { text?: unknown };
+    try {
+      body = (await response.json()) as { text?: unknown };
+    } catch (error) {
+      throw new Error(`Malformed bridge response: ${(error as Error).message}`);
+    }
     if (typeof body.text !== 'string') {
       throw new Error('Malformed bridge response: missing "text"');
     }
