@@ -14,7 +14,8 @@ module.exports = tseslint.config(
     rules: {
       // Destructuring a key solely to exclude it from the rest object
       // (used in env.schema.spec.ts) is intentional, not an unused var.
-      '@typescript-eslint/no-unused-vars': ['error', { ignoreRestSiblings: true }],
+      // Also ignore underscore-prefixed vars (intentional unused params).
+      '@typescript-eslint/no-unused-vars': ['error', { ignoreRestSiblings: true, argsIgnorePattern: '^_' }],
     },
   },
 );
