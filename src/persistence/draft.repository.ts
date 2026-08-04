@@ -92,20 +92,20 @@ export class DraftRepository {
     return rows.map(toDomain);
   }
 
-  async incrementAttempts(id: string): Promise<number> {
+  async incrementAttempts(id: string, now: Date): Promise<{ attempts: number; lastAttemptAt: Date }> {
     const row = await this.prisma.draft.update({
       where: { id },
-      data: { publishAttempts: { increment: 1 } },
-      select: { publishAttempts: true },
+      data: { publishAttempts: { increment: 1 }, lastAttemptAt: now },
+      select: { publishAttempts: true, lastAttemptAt: true },
     });
-    return row.publishAttempts;
+    return { attempts: row.publishAttempts, lastAttemptAt: row.lastAttemptAt as Date };
   }
 
-  async attemptsFor(id: string): Promise<number> {
+  async publishState(id: string): Promise<{ attempts: number; lastAttemptAt: Date | null }> {
     const row = await this.prisma.draft.findUnique({
       where: { id },
-      select: { publishAttempts: true },
+      select: { publishAttempts: true, lastAttemptAt: true },
     });
-    return row?.publishAttempts ?? 0;
+    return { attempts: row?.publishAttempts ?? 0, lastAttemptAt: row?.lastAttemptAt ?? null };
   }
 }

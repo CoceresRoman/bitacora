@@ -32,11 +32,12 @@ function harness(due: Draft[], publisher: PublisherPort) {
       saved.push(d);
       return d;
     },
-    incrementAttempts: async (id: string) => {
+    incrementAttempts: async (id: string, now: Date) => {
       const next = (attempts.get(id) ?? 0) + 1;
       attempts.set(id, next);
-      return next;
+      return { attempts: next, lastAttemptAt: now };
     },
+    publishState: async () => ({ attempts: attempts.get('d1') ?? 0, lastAttemptAt: null }),
   } as unknown as DraftRepository;
   const review = {
     notify: async (text: string) => {
@@ -123,5 +124,56 @@ describe('PublishQueue.drain', () => {
   it('uses an increasing backoff', () => {
     expect(BACKOFF_MINUTES).toEqual([1, 5, 25]);
     expect(MAX_PUBLISH_ATTEMPTS).toBe(3);
+  });
+});
+
+describe('PublishQueue backoff', () => {
+  function backoffHarness(state: { attempts: number; lastAttemptAt: Date | null }) {
+    let published = 0;
+    const publisher: PublisherPort = {
+      publish: async () => {
+        published++;
+        return { urn: 'urn:li:share:9' };
+      },
+    };
+    const drafts = {
+      findDuePublication: async () => [draft()],
+      save: async (d: Draft) => d,
+      publishState: async () => state,
+      incrementAttempts: async (_id: string, now: Date) => ({
+        attempts: state.attempts + 1,
+        lastAttemptAt: now,
+      }),
+    } as unknown as DraftRepository;
+    const review = {
+      notify: async () => undefined,
+      sendForReview: async () => undefined,
+      onDecision: () => undefined,
+    } as ReviewChannelPort;
+    return { queue: new PublishQueue(drafts, publisher, review), published: () => published };
+  }
+
+  it('skips a draft whose backoff has not elapsed', async () => {
+    const h = backoffHarness({
+      attempts: 1,
+      lastAttemptAt: new Date(NOW.getTime() - 30 * 1000),
+    });
+    await h.queue.drain(NOW);
+    expect(h.published()).toBe(0);
+  });
+
+  it('retries once the backoff has elapsed', async () => {
+    const h = backoffHarness({
+      attempts: 1,
+      lastAttemptAt: new Date(NOW.getTime() - 10 * 60 * 1000),
+    });
+    await h.queue.drain(NOW);
+    expect(h.published()).toBe(1);
+  });
+
+  it('publishes immediately on the first attempt', async () => {
+    const h = backoffHarness({ attempts: 0, lastAttemptAt: null });
+    await h.queue.drain(NOW);
+    expect(h.published()).toBe(1);
   });
 });

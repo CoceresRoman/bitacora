@@ -21,8 +21,18 @@ export class PublishQueue {
     const due = await this.drafts.findDuePublication(now);
     for (const draft of due) {
       if (draft.publishedUrn) continue;
+
+      const { attempts, lastAttemptAt } = await this.drafts.publishState(draft.id);
+      if (attempts >= MAX_PUBLISH_ATTEMPTS) continue;
+      if (lastAttemptAt && !this.backoffElapsed(attempts, lastAttemptAt, now)) continue;
+
       await this.publishOne(draft, now);
     }
+  }
+
+  private backoffElapsed(attempts: number, lastAttemptAt: Date, now: Date): boolean {
+    const waitMs = this.backoffMinutes(attempts - 1) * 60 * 1000;
+    return now.getTime() - lastAttemptAt.getTime() >= waitMs;
   }
 
   private async publishOne(draft: Draft, now: Date): Promise<void> {
@@ -32,7 +42,7 @@ export class PublishQueue {
       this.logger.log(`Published draft ${draft.id} as ${urn}`);
     } catch (error) {
       const message = (error as Error).message;
-      const attempts = await this.drafts.incrementAttempts(draft.id);
+      const { attempts } = await this.drafts.incrementAttempts(draft.id, now);
       this.logger.warn(`Publish attempt ${attempts} for ${draft.id} failed: ${message}`);
 
       if (attempts >= MAX_PUBLISH_ATTEMPTS) {
@@ -43,7 +53,7 @@ export class PublishQueue {
     }
   }
 
-  /** Minutes to wait before the next attempt. Consumed by the scheduler. */
+  /** Minutes to wait before the next attempt. Consumed by drain() and the scheduler. */
   backoffMinutes(attempts: number): number {
     return BACKOFF_MINUTES[Math.min(attempts, BACKOFF_MINUTES.length - 1)];
   }
