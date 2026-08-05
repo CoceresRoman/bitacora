@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { applyDecision, Decision } from '../core/draft.entity';
+import { applyDecision, Decision, Draft, DraftStatus } from '../core/draft.entity';
 import { REVIEW_CHANNEL_PORT, ReviewChannelPort } from '../core/ports/review-channel.port';
 import { CuratorService } from '../curator/curator.service';
 import { GeneratorService } from '../generator/generator.service';
@@ -9,6 +9,22 @@ import { CycleLogRepository, CycleOutcome } from '../persistence/cycle-log.repos
 import { TokenStore } from '../publisher/linkedin/token.store';
 
 const LOOKBACK_DAYS = 7;
+
+/**
+ * Spanish description of each draft status, for the message sent when a
+ * decision arrives for a draft that can no longer take it (e.g. the owner
+ * taps "Aprobar" on a draft the 5-minute sweep already marked EXPIRED).
+ */
+const STATUS_ES: Record<DraftStatus, string> = {
+  DRAFTING: 'en borrador',
+  PENDING_REVIEW: 'pendiente de revisión',
+  REVISING: 'en reescritura',
+  APPROVED: 'aprobado',
+  SCHEDULED: 'programado',
+  PUBLISHED: 'publicado',
+  DISCARDED: 'descartado',
+  EXPIRED: 'vencido',
+};
 
 @Injectable()
 export class CycleService {
@@ -50,8 +66,23 @@ export class CycleService {
     }
 
     const { draft, violations } = await this.generator.generateFor(best);
+
+    try {
+      await this.review.sendForReview(draft);
+    } catch (error) {
+      // The signal must not be consumed and the cycle must not be recorded
+      // as RAN when the owner never actually received the draft:
+      // markUsed() would make recoverMissedCycle skip this signal forever,
+      // and the persisted PENDING_REVIEW draft would just expire 48h later
+      // with nobody having seen it.
+      this.logger.error(
+        `Failed to send draft ${draft.id} for review, signal ${best.id} left unused: ${(error as Error).message}`,
+      );
+      await this.cycles.record(now, 'SEND_FAILED');
+      return 'SEND_FAILED';
+    }
+
     await this.signals.markUsed(best.id);
-    await this.review.sendForReview(draft);
 
     if (violations.length > 0) {
       await this.review.notify(
@@ -72,7 +103,25 @@ export class CycleService {
       return;
     }
 
-    const updated = applyDecision(draft, decision, now);
+    let updated: Draft;
+    try {
+      updated = applyDecision(draft, decision, now);
+    } catch (error) {
+      // The buttons on an old Telegram message are never removed, so a tap
+      // can arrive for a draft the 5-minute sweep already expired (or that
+      // moved on some other way) after the message was sent. Telling the
+      // owner the real current state beats letting this throw bubble up to
+      // the poll loop's generic catch, which would just log it and leave
+      // the owner thinking the callback's "Aprobado"/"Descartado" toast
+      // actually did something.
+      this.logger.warn(
+        `Ignoring ${decision.kind} for draft ${draftId} in status ${draft.status}: ${(error as Error).message}`,
+      );
+      await this.review.notify(
+        `Ese borrador ya no admite esa acción — está ${STATUS_ES[draft.status]}. No se aplicó ningún cambio.`,
+      );
+      return;
+    }
     await this.drafts.save(updated);
 
     if (decision.kind === 'revise') {

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from './prisma.service';
 
-export type CycleOutcome = 'RAN' | 'SKIPPED_NO_MATERIAL' | 'SKIPPED_STALE';
+export type CycleOutcome = 'RAN' | 'SKIPPED_NO_MATERIAL' | 'SKIPPED_STALE' | 'SEND_FAILED';
 
 @Injectable()
 export class CycleLogRepository {

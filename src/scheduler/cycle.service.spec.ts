@@ -157,6 +157,40 @@ describe('CycleService.runCycle', () => {
     expect(notified.some((text) => /reconect/i.test(text))).toBe(true);
   });
 
+  it('does not mark the signal used or record RAN when the owner never receives the draft', async () => {
+    const marked: string[] = [];
+    const logged: string[] = [];
+    const service = new CycleService(
+      {
+        collect: async () => [signal],
+        pendingSignals: async () => [signal],
+        pickBest: () => signal,
+        recentTopics: async () => [],
+      } as unknown as CuratorService,
+      { generateFor: async () => ({ draft, violations: [] }) } as unknown as GeneratorService,
+      {
+        sendForReview: async () => {
+          throw new Error('Failed to deliver draft d1 to Telegram');
+        },
+        notify: async () => undefined,
+        onDecision: () => undefined,
+      } as ReviewChannelPort,
+      { findById: async () => draft, save: async (d: Draft) => d, findExpirable: async () => [] } as unknown as DraftRepository,
+      { markUsed: async (id: string) => marked.push(id) } as unknown as SignalRepository,
+      {
+        record: async (_at: Date, outcome: string) => logged.push(outcome),
+        lastCycleAt: async () => null,
+      } as unknown as CycleLogRepository,
+      { needsReauth: async () => false } as unknown as TokenStore,
+    );
+
+    const outcome = await service.runCycle(NOW);
+
+    expect(outcome).not.toBe('RAN');
+    expect(marked).toEqual([]);
+    expect(logged).not.toContain('RAN');
+  });
+
   it('scores the full unused backlog, not only what this run collected', async () => {
     const olderSignal: RawSignal = { ...signal, id: 's-old', payload: 'idea vieja' };
     const collected: RawSignal[] = [];
@@ -201,6 +235,42 @@ describe('CycleService.handleDecision', () => {
     await h.service.handleDecision('d1', { kind: 'revise', feedback: 'mas corto' }, NOW);
     expect(h.reviewed).toHaveLength(1);
     expect(h.reviewed[0].bodyEs).toBe('reescrito');
+  });
+
+  it('tells the owner the real state instead of throwing when the draft can no longer take that decision', async () => {
+    const expired: Draft = { ...draft, status: 'EXPIRED' };
+    const saved: Draft[] = [];
+    const notified: string[] = [];
+    const service = new CycleService(
+      {} as CuratorService,
+      {} as GeneratorService,
+      {
+        sendForReview: async () => undefined,
+        notify: async (text: string) => {
+          notified.push(text);
+        },
+        onDecision: () => undefined,
+      },
+      {
+        findById: async () => expired,
+        save: async (d: Draft) => {
+          saved.push(d);
+          return d;
+        },
+        findExpirable: async () => [],
+      } as unknown as DraftRepository,
+      {} as SignalRepository,
+      {} as CycleLogRepository,
+      {} as TokenStore,
+    );
+
+    await expect(
+      service.handleDecision('d1', { kind: 'approve' }, NOW),
+    ).resolves.toBeUndefined();
+
+    expect(saved).toEqual([]);
+    expect(notified).toHaveLength(1);
+    expect(notified[0]).toMatch(/vencido/i);
   });
 
   it('ignores a decision for an unknown draft instead of throwing', async () => {

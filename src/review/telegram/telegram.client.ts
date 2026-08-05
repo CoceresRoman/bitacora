@@ -61,13 +61,21 @@ export class TelegramClient {
     );
   }
 
-  async sendMessage(chatId: string, text: string, keyboard?: InlineKeyboard): Promise<void> {
-    await this.call('sendMessage', {
+  /**
+   * Returns whether Telegram confirmed delivery. `call()` swallows network
+   * and API errors into `null`, so callers that must know whether the
+   * owner actually received the message (e.g. draft review requests)
+   * cannot rely on this resolving as evidence of success — they need to
+   * check the return value.
+   */
+  async sendMessage(chatId: string, text: string, keyboard?: InlineKeyboard): Promise<boolean> {
+    const result = await this.call('sendMessage', {
       chat_id: chatId,
       text,
       reply_markup: keyboard,
       disable_web_page_preview: true,
     });
+    return result !== null;
   }
 
   async answerCallbackQuery(id: string, text: string): Promise<void> {
