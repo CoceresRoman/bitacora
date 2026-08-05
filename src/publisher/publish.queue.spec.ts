@@ -121,6 +121,55 @@ describe('PublishQueue.drain', () => {
     expect(h.saved.map((d) => d.id)).toEqual(['d2']);
   });
 
+  it('never republishes when the post-publish save fails: it locks the draft out instead of retrying', async () => {
+    let publishCalls = 0;
+    const publisher: PublisherPort = {
+      publish: async () => {
+        publishCalls++;
+        return { urn: 'urn:li:share:dup-risk' };
+      },
+    };
+    const attempts = new Map<string, number>();
+    const notified: string[] = [];
+    const drafts = {
+      findDuePublication: async () => [draft()],
+      save: async () => {
+        throw new Error('SQLITE_BUSY: database is locked');
+      },
+      incrementAttempts: async (id: string, now: Date) => {
+        const next = (attempts.get(id) ?? 0) + 1;
+        attempts.set(id, next);
+        return { attempts: next, lastAttemptAt: now };
+      },
+      setPublishAttempts: async (id: string, next: number) => {
+        attempts.set(id, next);
+      },
+      publishState: async () => ({ attempts: attempts.get('d1') ?? 0, lastAttemptAt: null }),
+    } as unknown as DraftRepository;
+    const review: ReviewChannelPort = {
+      notify: async (text: string) => {
+        notified.push(text);
+      },
+      sendForReview: async () => undefined,
+      onDecision: () => undefined,
+    };
+    const queue = new PublishQueue(drafts, publisher, review);
+
+    await queue.drain(NOW);
+
+    expect(publishCalls).toBe(1);
+    expect(attempts.get('d1')).toBe(MAX_PUBLISH_ATTEMPTS);
+    expect(notified).toHaveLength(1);
+    expect(notified[0]).toContain('urn:li:share:dup-risk');
+
+    // A later drain must see this draft as exhausted (findDuePublication
+    // still returns it, since publishedUrn was never actually persisted)
+    // and must not call publish() again — that would post the identical
+    // text to LinkedIn a second time.
+    await queue.drain(NOW);
+    expect(publishCalls).toBe(1);
+  });
+
   it('uses an increasing backoff', () => {
     expect(BACKOFF_MINUTES).toEqual([1, 5, 25]);
     expect(MAX_PUBLISH_ATTEMPTS).toBe(3);

@@ -65,6 +65,17 @@ describe('DraftRepository', () => {
     expect(ids).not.toContain(dueLater.id);
   });
 
+  it('sets the publish attempt counter directly rather than incrementing it', async () => {
+    const created = await repo.create({ signalId: 's6', topic: 'lockout', bodyEs: 'texto' });
+    await repo.save({ ...created, status: 'APPROVED' });
+
+    await repo.setPublishAttempts(created.id, 3, NOW);
+
+    const state = await repo.publishState(created.id);
+    expect(state.attempts).toBe(3);
+    expect(state.lastAttemptAt?.toISOString()).toBe(NOW.toISOString());
+  });
+
   it('lists topics from the recency window only', async () => {
     const old = await repo.create({ signalId: 's5', topic: 'topic-viejo', bodyEs: 'x' });
     await prisma.draft.update({

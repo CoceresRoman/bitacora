@@ -108,4 +108,18 @@ export class DraftRepository {
     });
     return { attempts: row?.publishAttempts ?? 0, lastAttemptAt: row?.lastAttemptAt ?? null };
   }
+
+  /**
+   * Sets the attempt counter directly to `attempts` (rather than
+   * incrementing) so a draft can be permanently taken out of the publish
+   * queue's retry loop in one write — used when LinkedIn already has the
+   * post but persisting that fact failed, where a further publish() call
+   * would post the identical text again.
+   */
+  async setPublishAttempts(id: string, attempts: number, now: Date): Promise<void> {
+    await this.prisma.draft.update({
+      where: { id },
+      data: { publishAttempts: attempts, lastAttemptAt: now },
+    });
+  }
 }
