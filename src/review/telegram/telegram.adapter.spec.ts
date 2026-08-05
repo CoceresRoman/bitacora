@@ -1,4 +1,4 @@
-import { TelegramAdapter } from './telegram.adapter';
+import { POLL_RETRY_DELAY_MS, TelegramAdapter } from './telegram.adapter';
 import { TelegramClient, TelegramUpdate } from './telegram.client';
 import { InboxSource } from '../../sources/inbox/inbox.source';
 import { Decision, Draft } from '../../core/draft.entity';
@@ -26,6 +26,7 @@ function fakes() {
   const client = {
     sendMessage: async (chatId: string, text: string, keyboard?: unknown) => {
       sent.push({ chatId, text, keyboard });
+      return true;
     },
     answerCallbackQuery: async (id: string) => {
       answered.push(id);
@@ -89,6 +90,21 @@ describe('TelegramAdapter security', () => {
 });
 
 describe('TelegramAdapter decisions', () => {
+  it('throws when Telegram does not confirm delivery of the review request', async () => {
+    const client = {
+      sendMessage: async () => false,
+      answerCallbackQuery: async () => undefined,
+      getUpdates: async () => [],
+    } as unknown as TelegramClient;
+    const inbox = { capture: async () => undefined } as unknown as InboxSource;
+    const unreachableAdapter = new TelegramAdapter(client, inbox, {
+      botToken: 't',
+      allowedChatId: ALLOWED,
+    });
+
+    await expect(unreachableAdapter.sendForReview(draft)).rejects.toThrow(/draft/i);
+  });
+
   it('sends the draft with four action buttons', async () => {
     const t = adapter();
     await t.adapter.sendForReview(draft);
@@ -280,6 +296,7 @@ describe('TelegramAdapter poll loop', () => {
     const client = {
       sendMessage: async (chatId: string, text: string) => {
         sent.push({ chatId, text });
+        return true;
       },
       answerCallbackQuery: async () => undefined,
       getUpdates: (_offset: number, _timeoutSec: number, signal?: AbortSignal) => {
@@ -324,5 +341,78 @@ describe('TelegramAdapter poll loop', () => {
     const resolverCountAfterDestroy = resolvers.length;
     await flush();
     expect(resolvers).toHaveLength(resolverCountAfterDestroy);
+  });
+});
+
+describe('TelegramAdapter poll loop backoff', () => {
+  beforeEach(() => {
+    // setImmediate/nextTick stay real so the existing flush() helper keeps
+    // draining microtasks; only setTimeout (used by the retry delay) is
+    // under fake-timer control so the test does not actually wait out the
+    // delay in real time.
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  function pollingClient() {
+    const resolvers: Array<(updates: TelegramUpdate[]) => void> = [];
+    const client = {
+      sendMessage: async () => undefined,
+      answerCallbackQuery: async () => undefined,
+      getUpdates: () =>
+        new Promise<TelegramUpdate[]>((resolve) => {
+          resolvers.push(resolve);
+        }),
+    } as unknown as TelegramClient;
+    const inbox = { capture: async () => undefined } as unknown as InboxSource;
+    return { resolvers, adapter: new TelegramAdapter(client, inbox, { botToken: 't', allowedChatId: ALLOWED }) };
+  }
+
+  it('does not immediately re-poll after Telegram is unreachable (empty result with no delay)', async () => {
+    const { resolvers, adapter: pollAdapter } = pollingClient();
+
+    pollAdapter.onModuleInit();
+    await flush();
+    expect(resolvers).toHaveLength(1);
+
+    // TelegramClient.call() swallows network errors into `null`, and
+    // getUpdates() maps that to `[]` — this is indistinguishable at this
+    // layer from a legitimate empty long poll. Either way the loop must not
+    // call getUpdates again until the backoff delay elapses.
+    resolvers[0]([]);
+    await flush();
+    await flush();
+    expect(resolvers).toHaveLength(1);
+
+    await jest.advanceTimersByTimeAsync(POLL_RETRY_DELAY_MS);
+    await flush();
+    expect(resolvers).toHaveLength(2);
+
+    pollAdapter.onModuleDestroy();
+  });
+
+  it('shuts down promptly during the backoff delay instead of waiting it out', async () => {
+    const { resolvers, adapter: pollAdapter } = pollingClient();
+
+    pollAdapter.onModuleInit();
+    await flush();
+    resolvers[0]([]);
+    await flush();
+    await flush();
+    expect(resolvers).toHaveLength(1);
+
+    pollAdapter.onModuleDestroy();
+    await flush();
+    await flush();
+
+    // Advancing all the way past the delay must not trigger a further poll:
+    // the destroy should have interrupted the wait rather than letting it
+    // run out.
+    await jest.advanceTimersByTimeAsync(POLL_RETRY_DELAY_MS);
+    await flush();
+    expect(resolvers).toHaveLength(1);
   });
 });
