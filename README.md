@@ -138,6 +138,16 @@ first test.
   `http://localhost:3000/auth/linkedin`. Whether LinkedIn's OpenID Connect flow issues a
   `refresh_token` for this app configuration is unconfirmed — see the open item in
   [`docs/linkedin.md`](docs/linkedin.md).
+- **An ambiguous LinkedIn response can still cause a duplicate post.** If LinkedIn accepts
+  the post but the response carries no `x-restli-id` header, or a `fetch` timeout or network
+  error arrives after LinkedIn already created the post, `LinkedInPublisher.publish`
+  (`src/publisher/linkedin/linkedin.publisher.ts`) throws with no URN to return. The service
+  genuinely cannot tell whether the post exists. That throw lands in the same `catch` as any
+  other publish failure in `PublishQueue.publishOne` (`src/publisher/publish.queue.ts`), which
+  calls `recordFailedAttempt` and lets the next five-minute drain call `publish()` again with
+  the identical text — so the same post can appear twice on the profile. This is distinct from
+  the storage-failure case below, which is closed. Retries are capped at
+  `MAX_PUBLISH_ATTEMPTS` (3), so the worst case is bounded, not unbounded.
 - **A storage failure right after a successful LinkedIn publish no longer triggers an
   automatic retry.** `PublishQueue.publishOne` (`src/publisher/publish.queue.ts`) persists
   the URN as the very next statement after `publisher.publish()` returns; if that specific
