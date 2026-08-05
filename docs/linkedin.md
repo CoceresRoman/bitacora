@@ -50,6 +50,12 @@ ENCRYPTION_KEY=<64 hex chars, e.g. `openssl rand -hex 32`>
 rest (see `src/publisher/crypto.ts`). Generate it once and keep it stable —
 rotating it invalidates any stored token and forces reconnection.
 
+**This flow — and the Telegram bot flow it depends on for the reconnect reminder — has not
+been exercised against the real LinkedIn or Telegram services while building this project.**
+The OAuth handler and the Telegram adapter are covered by automated tests against fakes
+(mocked HTTP responses), not by a real run of either. The steps below are the intended
+procedure; treat your first real connection as the first live test of it.
+
 ## 4. Connect the account
 
 The server binds to `127.0.0.1` only (see `src/main.ts`) because the OAuth

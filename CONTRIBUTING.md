@@ -23,11 +23,13 @@ both.
 
 ## TDD is the expectation, not a suggestion
 
-Every existing module in this codebase was built test-first: a failing spec, then the
-minimal implementation that makes it pass. New contributions should follow the same
-loop — red, green, refactor — rather than writing implementation first and back-filling
-tests. If you're adding behavior, we want to see the test that would have failed against
-the old code.
+Most of this codebase was built test-first: a failing spec, then the minimal
+implementation that makes it pass. That is verifiable for the bulk of the history, but not
+for the first two tasks — their commits landed squashed, so red-before-green can't be
+confirmed from the git log for that early slice. New contributions should follow the
+red-green-refactor loop regardless — rather than writing implementation first and
+back-filling tests. If you're adding behavior, we want to see the test that would have
+failed against the old code.
 
 ## Adding adapters
 

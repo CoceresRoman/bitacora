@@ -98,6 +98,14 @@ From here, the scheduler takes over: it runs a cycle Monday/Wednesday/Friday at 
 drains the publish queue every 5 minutes. You can also send yourself an idea on Telegram at
 any time — it gets folded into the next cycle.
 
+**Neither of the two steps above that talk to a live external service — the LinkedIn OAuth
+round trip in step 10, and the Telegram bot flow (long polling, buttons, callbacks) — has
+been exercised against the real LinkedIn or Telegram services as part of building this
+project.** Both are covered by automated tests that exercise the code against fakes
+(`TelegramClient`/`TelegramAdapter` and the LinkedIn OAuth handler are tested with fake
+HTTP responses, not real API calls). Treat the first real run of each as the actual
+first test.
+
 ## Security
 
 - **`TELEGRAM_ALLOWED_CHAT_ID` is mandatory.** The process validates its environment at
@@ -110,12 +118,11 @@ any time — it gets folded into the next cycle.
   requires a shared secret (`CLAUDE_BRIDGE_SECRET`) on every request — see
   [`docs/bridge.md`](docs/bridge.md).
 - **The OAuth callback route has no auth guard of its own** — anyone who can reach
-  `/auth/linkedin/callback` while a flow is pending could hijack the token exchange. The
-  design intent is for the whole HTTP server to be loopback-only for this reason. **Known
-  gap:** as merged, `src/main.ts` calls `app.listen(port)` without pinning the host, so the
-  process does not currently restrict itself to `127.0.0.1` the way the bridge does. Until
-  that is fixed, do not run this on a shared or internet-facing machine without putting a
-  firewall or reverse proxy in front of the port.
+  `/auth/linkedin/callback` while a flow is pending could hijack the token exchange. For that
+  reason `src/main.ts` binds the whole HTTP server to `127.0.0.1` only, the same as the
+  bridge. The practical consequence: if you're not on the same machine, reaching
+  `/auth/linkedin` to (re)connect the LinkedIn account requires an SSH tunnel
+  (`ssh -L 3000:127.0.0.1:3000 host`) — there is no wider bind to fall back to, by design.
 - **Never commit `.env` or `data/`.** Both are already in `.gitignore`; `data/` holds the
   SQLite database with your (encrypted) LinkedIn token and post history.
 
@@ -131,10 +138,17 @@ any time — it gets folded into the next cycle.
   `http://localhost:3000/auth/linkedin`. Whether LinkedIn's OpenID Connect flow issues a
   `refresh_token` for this app configuration is unconfirmed — see the open item in
   [`docs/linkedin.md`](docs/linkedin.md).
-- **A crash between the LinkedIn API call and the database write can duplicate a post.**
-  LinkedIn does not expose an idempotency key for member posts (`POST /rest/posts`), so
-  there is no way to make a retry after a partial failure provably safe. This is documented
-  rather than closed — see the plan self-review in the task history for why.
+- **A storage failure right after a successful LinkedIn publish no longer triggers an
+  automatic retry.** `PublishQueue.publishOne` (`src/publisher/publish.queue.ts`) persists
+  the URN as the very next statement after `publisher.publish()` returns; if that specific
+  write fails (e.g. an ordinary SQLite lock), the draft is locked out of the retry loop
+  entirely — instead of being treated as a publish failure, which used to increment the
+  normal attempt counter and let the next drain call `publish()` again on the same text.
+  The owner is notified with the real URN so they can reconcile by hand. The one narrow
+  window that remains: if that lockout write *also* fails (the same lock/disk condition
+  still holding), the draft stays eligible and a later drain could publish it again.
+  LinkedIn does not expose an idempotency key for member posts (`POST /rest/posts`), so this
+  last sliver can't be made provably safe — it's documented rather than closed.
 
 ## Customising the voice
 
