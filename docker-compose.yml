@@ -1,0 +1,15 @@
+# Optional convenience for running the app itself. The Claude CLI bridge
+# (`npm run bridge`) is intentionally NOT containerized here — it needs the
+# host's own logged-in Claude CLI session, which a container does not have.
+# `network_mode: host` is what lets this container reach the bridge on the
+# host's 127.0.0.1:8788 (CLAUDE_BRIDGE_URL in .env) without any port mapping
+# or Docker network gymnastics. See the README's "No API keys" section for
+# why the bridge exists at all.
+services:
+  bitacora:
+    build: .
+    network_mode: host
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
