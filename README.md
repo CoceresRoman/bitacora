@@ -177,4 +177,7 @@ declined.
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE).
+Apache License 2.0 — see [`LICENSE`](LICENSE).
+
+If you redistribute this project or a derivative of it, keep the [`NOTICE`](NOTICE) file
+with your distribution and state the changes you made, as the license requires.

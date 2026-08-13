@@ -65,3 +65,15 @@ the right shape is a new `LlmPort` adapter for another **local** tool — see ab
 Match the existing codebase: strict TypeScript, no `any`, immutable updates (spread rather
 than mutate), small focused files, ports/adapters over direct coupling to a specific vendor
 SDK. `eslint.config.js` and `tsconfig.json` are the source of truth for what's enforced.
+
+## License of contributions
+
+This project is licensed under the **Apache License 2.0** ([`LICENSE`](LICENSE)). Per
+section 5 of that license, any contribution you intentionally submit for inclusion — a pull
+request, a patch on an issue — is licensed under the same terms, with no additional
+conditions. There is no separate CLA to sign.
+
+Don't add a copyright header claiming exclusive ownership of a file you edited, and don't
+alter the [`NOTICE`](NOTICE) file. If a contribution brings in third-party code, say so in
+the PR and name its license: anything incompatible with Apache-2.0 (notably GPL-licensed
+code) can't be merged.

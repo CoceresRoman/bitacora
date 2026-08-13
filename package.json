@@ -2,7 +2,7 @@
   "name": "bitacora",
   "version": "0.1.0",
   "description": "Turns real engineering activity into LinkedIn posts, with human approval before publishing.",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "private": true,
   "engines": { "node": ">=22" },
   "scripts": {
