@@ -5,3 +5,7 @@ data/
 .env
 *.tsbuildinfo
 .superpowers/
+
+# Claude Code (local config, not shared)
+.claude/
+CLAUDE.md
