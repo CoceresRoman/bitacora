@@ -4,6 +4,7 @@
 
 ```bash
 npm install
+cp .env.example .env           # prisma needs DATABASE_URL to resolve prisma.config.ts
 npx prisma generate
 npm test                       # unit + integration + e2e specs
 npm test -- --coverage         # same, with the coverage gate (80% lines/statements)

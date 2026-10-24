@@ -39,7 +39,7 @@ describe('full cycle', () => {
 
   beforeAll(() => {
     rmSync(DB_PATH, { force: true });
-    execFileSync('npx', ['prisma', 'db', 'push', '--skip-generate'], {
+    execFileSync('npx', ['prisma', 'db', 'push'], {
       env: { ...process.env, DATABASE_URL },
       stdio: 'ignore',
     });

@@ -11,5 +11,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
+      - run: npx prisma generate
+        env: { DATABASE_URL: "file:./data/ci.db" }
       - run: npm run lint
       - run: npm test
