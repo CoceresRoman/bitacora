@@ -3,6 +3,11 @@ on: [push, pull_request]
 jobs:
   check:
     runs-on: ubuntu-latest
+    env:
+      # The scheduler's cadence (Mon/Wed/Fri 08:00) is computed in local time;
+      # match the timezone of the machine this runs on so recovery-window
+      # tests agree with production.
+      TZ: America/Argentina/Buenos_Aires
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
